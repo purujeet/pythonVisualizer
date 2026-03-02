@@ -146,7 +146,6 @@ json.dumps(_tree_root)
             }
         }
 
-        // Draw the D3 Tree
         // Draw the D3 Tree with Animation
         function drawTree(data) {
             const container = d3.select("#tree-container");
@@ -203,29 +202,32 @@ json.dumps(_tree_root)
                 .join("g")
                 .attr("class", "node")
                 .attr("transform", d => `translate(${d.x},${d.y})`)
-                .style("opacity", 0) // Start completely transparent
-                .style("transform", "scale(0.5)"); // Start slightly shrunk
+                .style("opacity", 0); // Start completely transparent
 
-            // Animate the nodes popping in
+            // Animate the nodes fading in
             nodes.transition()
                 .duration(ANIMATION_SPEED)
                 .delay((d, i) => i * ANIMATION_SPEED) // Stagger by index
-                .style("opacity", 1)
-                .style("transform", "scale(1)");
+                .style("opacity", 1);
 
-            // Add the circles to the nodes
+            // Add the circles and animate them growing
             nodes.append("circle")
-                .attr("r", 6);
+                .attr("r", 0) // Start at size 0
+                .transition()
+                .duration(ANIMATION_SPEED)
+                .delay((d, i) => i * ANIMATION_SPEED) // Match the stagger
+                .attr("r", 6); // Grow to full size
 
             // Add the text to the nodes
             nodes.append("text")
                 .attr("dy", "-1em")
                 .attr("text-anchor", "middle")
                 .text(d => d.data.name)
-                .clone(true).lower()
+                .clone(true).lower() // Creates the white outline for readability
                 .attr("stroke", "white")
                 .attr("stroke-width", 3);
         }
+
         // Start initialization
         init();
     </script>
