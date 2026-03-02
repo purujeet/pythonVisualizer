@@ -147,6 +147,7 @@ json.dumps(_tree_root)
         }
 
         // Draw the D3 Tree
+        // Draw the D3 Tree with Animation
         function drawTree(data) {
             const container = d3.select("#tree-container");
             container.selectAll("*").remove(); // Clear previous tree
@@ -174,7 +175,10 @@ json.dumps(_tree_root)
             // Center the initial view
             svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 50).scale(1));
 
-            // Draw Links (Lines)
+            // --- ANIMATION SETTINGS ---
+            const ANIMATION_SPEED = 800; // milliseconds between each step
+
+            // 1. Draw Links (Lines) with tracing animation
             g.selectAll(".link")
                 .data(root.links())
                 .join("path")
@@ -182,19 +186,38 @@ json.dumps(_tree_root)
                 .attr("d", d3.linkVertical()
                     .x(d => d.x)
                     .y(d => d.y)
-                );
+                )
+                // Set up the line to be "invisible" at first using dash arrays
+                .attr("stroke-dasharray", function() { return this.getTotalLength() || 500; })
+                .attr("stroke-dashoffset", function() { return this.getTotalLength() || 500; })
+                // Animate the line drawing itself
+                .transition()
+                .duration(ANIMATION_SPEED)
+                // Stagger the delay: Link targets node i+1, so delay by (i+1)
+                .delay((d, i) => (i + 1) * ANIMATION_SPEED) 
+                .attr("stroke-dashoffset", 0);
 
-            // Draw Nodes
+            // 2. Draw Nodes with a pop-in fade animation
             const nodes = g.selectAll(".node")
                 .data(root.descendants())
                 .join("g")
                 .attr("class", "node")
-                .attr("transform", d => `translate(${d.x},${d.y})`);
+                .attr("transform", d => `translate(${d.x},${d.y})`)
+                .style("opacity", 0) // Start completely transparent
+                .style("transform", "scale(0.5)"); // Start slightly shrunk
 
+            // Animate the nodes popping in
+            nodes.transition()
+                .duration(ANIMATION_SPEED)
+                .delay((d, i) => i * ANIMATION_SPEED) // Stagger by index
+                .style("opacity", 1)
+                .style("transform", "scale(1)");
+
+            // Add the circles to the nodes
             nodes.append("circle")
                 .attr("r", 6);
 
-            // Draw Text Background (for readability)
+            // Add the text to the nodes
             nodes.append("text")
                 .attr("dy", "-1em")
                 .attr("text-anchor", "middle")
@@ -203,7 +226,6 @@ json.dumps(_tree_root)
                 .attr("stroke", "white")
                 .attr("stroke-width", 3);
         }
-
         // Start initialization
         init();
     </script>
