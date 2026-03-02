@@ -19,7 +19,7 @@
     <style>
         .CodeMirror { height: 100%; font-size: 16px; font-family: 'Fira Code', monospace; }
         .node circle { fill: #8b5cf6; stroke: #c4b5fd; stroke-width: 3px; }
-        .node text { font: 12px sans-serif; fill: #1f2937; font-weight: 600; text-shadow: 0 1px 3px rgba(255,255,255,0.8); }
+        .node text { font: 12px sans-serif; fill: #1f2937; font-weight: 600; }
         .link { fill: none; stroke: #9ca3af; stroke-width: 2px; opacity: 0.6; }
         #tree-container { background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; background-color: #f9fafb; cursor: grab; }
         #tree-container:active { cursor: grabbing; }
@@ -30,7 +30,7 @@
     <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-lg z-10">
         <div>
             <h1 class="text-2xl font-bold text-purple-400">Recursion Visualizer</h1>
-            <p class="text-xs text-gray-400">Write Python, hit run, and explore the call stack tree.</p>
+            <p class="text-xs text-gray-400">Watch the call stack resolve in real-time.</p>
         </div>
         <div class="flex items-center gap-4">
             <span id="status" class="text-sm text-yellow-400 animate-pulse">Loading Python Engine...</span>
@@ -90,16 +90,18 @@ fib(4)
             const userCode = editor.getValue();
             pyodide.globals.set("USER_CODE", userCode);
 
-            // Python wrapper script to profile and trace execution
+            // UPDATED PYTHON SCRIPT: Now with a step counter!
             const tracerScript = `
 import sys
 import json
 
-_tree_root = {"name": "Execution Start", "children": []}
+_step_counter = 1
+_tree_root = {"name": "Execution Start", "call_step": 0, "return_step": 0, "children": []}
 _call_stack = [_tree_root]
 
 def _trace_calls(frame, event, arg):
-    # Only trace the code written by the user
+    global _step_counter
+    # Only trace user code
     if frame.f_code.co_filename != "<string>": return _trace_calls
     if frame.f_code.co_name == "<module>": return _trace_calls
         
@@ -112,13 +114,26 @@ def _trace_calls(frame, event, arg):
                 val = frame.f_locals.get(var_name)
                 args.append(f"{var_name}={repr(val)}")
             except: pass
-        node = {"name": f"{func_name}({', '.join(args)})", "children": []}
+        
+        # Log the call step
+        node = {
+            "name": f"{func_name}({', '.join(args)})", 
+            "return_val": "",
+            "call_step": _step_counter,
+            "return_step": -1,
+            "children": []
+        }
+        _step_counter += 1
         _call_stack[-1]["children"].append(node)
         _call_stack.append(node)
+        
     elif event == "return":
         if len(_call_stack) > 1:
             node = _call_stack.pop()
-            node["name"] += f" ➔ {repr(arg)}"
+            # Log the return step and value
+            node["return_val"] = repr(arg)
+            node["return_step"] = _step_counter
+            _step_counter += 1
             
     return _trace_calls
 
@@ -127,9 +142,10 @@ sys.setprofile(_trace_calls)
 try:
     exec(USER_CODE, {"__name__": "__main__"})
 except Exception as e:
-    _tree_root["children"].append({"name": f"Error: {e}", "children": []})
+    _tree_root["children"].append({"name": f"Error: {e}", "call_step": _step_counter, "return_step": _step_counter, "children": []})
 finally:
     sys.setprofile(None)
+    _tree_root["return_step"] = _step_counter
 
 json.dumps(_tree_root)
 `;
@@ -146,89 +162,104 @@ json.dumps(_tree_root)
             }
         }
 
-        // Draw the D3 Tree with Animation
+        // Draw the D3 Tree with Timeline Animation
         function drawTree(data) {
             const container = d3.select("#tree-container");
-            container.selectAll("*").remove(); // Clear previous tree
+            container.selectAll("*").remove(); 
 
             const width = container.node().getBoundingClientRect().width;
             const height = container.node().getBoundingClientRect().height;
 
-            const svg = container.append("svg")
-                .attr("width", "100%")
-                .attr("height", "100%");
-
+            const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
             const g = svg.append("g");
 
-            // Add Zoom & Pan functionality
-            const zoom = d3.zoom()
-                .scaleExtent([0.1, 3])
-                .on("zoom", (event) => g.attr("transform", event.transform));
+            const zoom = d3.zoom().scaleExtent([0.1, 3]).on("zoom", (event) => g.attr("transform", event.transform));
             svg.call(zoom);
 
-            // Create Tree Layout (top-down)
             const root = d3.hierarchy(data);
-            const treeLayout = d3.tree().nodeSize([180, 80]); // Horizontal, Vertical spacing
+            const treeLayout = d3.tree().nodeSize([180, 80]); 
             treeLayout(root);
 
-            // Center the initial view
             svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 50).scale(1));
 
-            // --- ANIMATION SETTINGS ---
-            const ANIMATION_SPEED = 800; // milliseconds between each step
+            // Faster animation speed because there are 2x as many steps now
+            const ANIMATION_SPEED = 400; 
 
-            // 1. Draw Links (Lines) with tracing animation
+            // 1. Draw Links using the target node's call_step
             g.selectAll(".link")
                 .data(root.links())
                 .join("path")
                 .attr("class", "link")
-                .attr("d", d3.linkVertical()
-                    .x(d => d.x)
-                    .y(d => d.y)
-                )
-                // Set up the line to be "invisible" at first using dash arrays
+                .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y))
                 .attr("stroke-dasharray", function() { return this.getTotalLength() || 500; })
                 .attr("stroke-dashoffset", function() { return this.getTotalLength() || 500; })
-                // Animate the line drawing itself
                 .transition()
                 .duration(ANIMATION_SPEED)
-                // Stagger the delay: Link targets node i+1, so delay by (i+1)
-                .delay((d, i) => (i + 1) * ANIMATION_SPEED) 
+                .delay(d => d.target.data.call_step * ANIMATION_SPEED) 
                 .attr("stroke-dashoffset", 0);
 
-            // 2. Draw Nodes with a pop-in fade animation
+            // 2. Draw Nodes
             const nodes = g.selectAll(".node")
                 .data(root.descendants())
                 .join("g")
                 .attr("class", "node")
                 .attr("transform", d => `translate(${d.x},${d.y})`)
-                .style("opacity", 0); // Start completely transparent
+                .style("opacity", 0); 
 
-            // Animate the nodes fading in
+            // Animate node fading in
             nodes.transition()
                 .duration(ANIMATION_SPEED)
-                .delay((d, i) => i * ANIMATION_SPEED) // Stagger by index
+                .delay(d => d.data.call_step * ANIMATION_SPEED) 
                 .style("opacity", 1);
 
-            // Add the circles and animate them growing
+            // Animate circle growing
             nodes.append("circle")
-                .attr("r", 0) // Start at size 0
+                .attr("r", 0) 
                 .transition()
                 .duration(ANIMATION_SPEED)
-                .delay((d, i) => i * ANIMATION_SPEED) // Match the stagger
-                .attr("r", 6); // Grow to full size
+                .delay(d => d.data.call_step * ANIMATION_SPEED)
+                .attr("r", 6);
 
-            // Add the text to the nodes
-            nodes.append("text")
+            // --- TEXT RENDERING ---
+            // Create the white outline for readability
+            const outline = nodes.append("text")
                 .attr("dy", "-1em")
                 .attr("text-anchor", "middle")
-                .text(d => d.data.name)
-                .clone(true).lower() // Creates the white outline for readability
                 .attr("stroke", "white")
-                .attr("stroke-width", 3);
+                .attr("stroke-width", 3)
+                .attr("stroke-linejoin", "round")
+                .style("opacity", 0.8)
+                .lower();
+            
+            outline.append("tspan").text(d => d.data.name);
+            outline.append("tspan")
+                .style("opacity", 0)
+                .text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "")
+                .transition()
+                .duration(ANIMATION_SPEED)
+                .delay(d => d.data.return_step * ANIMATION_SPEED)
+                .style("opacity", 1);
+
+            // Create the main colored text
+            const mainText = nodes.append("text")
+                .attr("dy", "-1em")
+                .attr("text-anchor", "middle");
+
+            // The function call text (appears immediately with node)
+            mainText.append("tspan").text(d => d.data.name);
+            
+            // The return value text (appears LATER, colored green)
+            mainText.append("tspan")
+                .style("opacity", 0)
+                .style("fill", "#059669") // Emerald green color
+                .text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "")
+                .transition()
+                .duration(ANIMATION_SPEED)
+                // Use the return_step to delay the pop-in!
+                .delay(d => d.data.return_step * ANIMATION_SPEED)
+                .style("opacity", 1);
         }
 
-        // Start initialization
         init();
     </script>
 </body>
