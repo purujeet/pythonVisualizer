@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Recursion Tree Visualizer</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+
+    <style>
+        .CodeMirror { height: 100%; font-size: 16px; font-family: 'Fira Code', monospace; }
+        .node circle { fill: #8b5cf6; stroke: #c4b5fd; stroke-width: 3px; }
+        .node text { font: 12px sans-serif; fill: #1f2937; font-weight: 600; text-shadow: 0 1px 3px rgba(255,255,255,0.8); }
+        .link { fill: none; stroke: #9ca3af; stroke-width: 2px; opacity: 0.6; }
+        #tree-container { background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; background-color: #f9fafb; cursor: grab; }
+        #tree-container:active { cursor: grabbing; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-gray-900 font-sans">
+
+    <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-lg z-10">
+        <div>
+            <h1 class="text-2xl font-bold text-purple-400">Recursion Visualizer</h1>
+            <p class="text-xs text-gray-400">Write Python, hit run, and explore the call stack tree.</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <span id="status" class="text-sm text-yellow-400 animate-pulse">Loading Python Engine...</span>
+            <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded font-bold transition-colors shadow-lg">
+                Run Code
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <div class="w-1/3 h-full border-r border-gray-700 bg-gray-800 flex flex-col">
+            <textarea id="code-editor">
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n-1) + fib(n-2)
+
+# Start the recursion!
+fib(4)
+</textarea>
+        </div>
+
+        <div class="w-2/3 h-full relative" id="tree-container">
+            </div>
+
+    </div>
+
+    <script>
+        // Initialize CodeMirror Editor
+        const editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
+            mode: "python",
+            theme: "dracula",
+            lineNumbers: true,
+            indentUnit: 4,
+            matchBrackets: true
+        });
+
+        let pyodide;
+
+        // Load Pyodide (Python Engine)
+        async function init() {
+            pyodide = await loadPyodide();
+            document.getElementById("status").textContent = "Python Ready";
+            document.getElementById("status").className = "text-sm text-green-400";
+            const runBtn = document.getElementById("run-btn");
+            runBtn.disabled = false;
+
+            runBtn.addEventListener("click", executeCode);
+        }
+
+        // Execute Python Code and Trace Calls
+        async function executeCode() {
+            document.getElementById("status").textContent = "Running & Tracing...";
+            document.getElementById("status").className = "text-sm text-yellow-400";
+            
+            const userCode = editor.getValue();
+            pyodide.globals.set("USER_CODE", userCode);
+
+            // Python wrapper script to profile and trace execution
+            const tracerScript = `
+import sys
+import json
+
+_tree_root = {"name": "Execution Start", "children": []}
+_call_stack = [_tree_root]
+
+def _trace_calls(frame, event, arg):
+    # Only trace the code written by the user
+    if frame.f_code.co_filename != "<string>": return _trace_calls
+    if frame.f_code.co_name == "<module>": return _trace_calls
+        
+    if event == "call":
+        func_name = frame.f_code.co_name
+        args = []
+        for i in range(frame.f_code.co_argcount):
+            try:
+                var_name = frame.f_code.co_varnames[i]
+                val = frame.f_locals.get(var_name)
+                args.append(f"{var_name}={repr(val)}")
+            except: pass
+        node = {"name": f"{func_name}({', '.join(args)})", "children": []}
+        _call_stack[-1]["children"].append(node)
+        _call_stack.append(node)
+    elif event == "return":
+        if len(_call_stack) > 1:
+            node = _call_stack.pop()
+            node["name"] += f" ➔ {repr(arg)}"
+            
+    return _trace_calls
+
+sys.setprofile(_trace_calls)
+
+try:
+    exec(USER_CODE, {"__name__": "__main__"})
+except Exception as e:
+    _tree_root["children"].append({"name": f"Error: {e}", "children": []})
+finally:
+    sys.setprofile(None)
+
+json.dumps(_tree_root)
+`;
+            try {
+                const jsonOutput = await pyodide.runPythonAsync(tracerScript);
+                const treeData = JSON.parse(jsonOutput);
+                drawTree(treeData);
+                document.getElementById("status").textContent = "Execution Complete";
+                document.getElementById("status").className = "text-sm text-green-400";
+            } catch (err) {
+                console.error(err);
+                document.getElementById("status").textContent = "Syntax Error in Python";
+                document.getElementById("status").className = "text-sm text-red-400";
+            }
+        }
+
+        // Draw the D3 Tree
+        function drawTree(data) {
+            const container = d3.select("#tree-container");
+            container.selectAll("*").remove(); // Clear previous tree
+
+            const width = container.node().getBoundingClientRect().width;
+            const height = container.node().getBoundingClientRect().height;
+
+            const svg = container.append("svg")
+                .attr("width", "100%")
+                .attr("height", "100%");
+
+            const g = svg.append("g");
+
+            // Add Zoom & Pan functionality
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 3])
+                .on("zoom", (event) => g.attr("transform", event.transform));
+            svg.call(zoom);
+
+            // Create Tree Layout (top-down)
+            const root = d3.hierarchy(data);
+            const treeLayout = d3.tree().nodeSize([180, 80]); // Horizontal, Vertical spacing
+            treeLayout(root);
+
+            // Center the initial view
+            svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 50).scale(1));
+
+            // Draw Links (Lines)
+            g.selectAll(".link")
+                .data(root.links())
+                .join("path")
+                .attr("class", "link")
+                .attr("d", d3.linkVertical()
+                    .x(d => d.x)
+                    .y(d => d.y)
+                );
+
+            // Draw Nodes
+            const nodes = g.selectAll(".node")
+                .data(root.descendants())
+                .join("g")
+                .attr("class", "node")
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+
+            nodes.append("circle")
+                .attr("r", 6);
+
+            // Draw Text Background (for readability)
+            nodes.append("text")
+                .attr("dy", "-1em")
+                .attr("text-anchor", "middle")
+                .text(d => d.data.name)
+                .clone(true).lower()
+                .attr("stroke", "white")
+                .attr("stroke-width", 3);
+        }
+
+        // Start initialization
+        init();
+    </script>
+</body>
+</html>
