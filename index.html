@@ -17,12 +17,17 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 
     <style>
-        .CodeMirror { height: 100%; font-size: 16px; font-family: 'Fira Code', monospace; }
+        .CodeMirror { height: 100%; font-size: 15px; font-family: 'Fira Code', monospace; }
         .node circle { fill: #8b5cf6; stroke: #c4b5fd; stroke-width: 3px; }
         .node text { font: 12px sans-serif; fill: #1f2937; font-weight: 600; }
         .link { fill: none; stroke: #9ca3af; stroke-width: 2px; opacity: 0.6; }
         #tree-container { background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; background-color: #f9fafb; cursor: grab; }
         #tree-container:active { cursor: grabbing; }
+        
+        /* Custom Scrollbar for dark panels */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden bg-gray-900 font-sans">
@@ -30,7 +35,7 @@
     <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-lg z-10">
         <div>
             <h1 class="text-2xl font-bold text-purple-400">Recursion Visualizer</h1>
-            <p class="text-xs text-gray-400">Watch the call stack resolve in real-time.</p>
+            <p class="text-xs text-gray-400">Watch the call stack resolve in real-time with I/O support.</p>
         </div>
         <div class="flex items-center gap-4">
             <span id="status" class="text-sm text-yellow-400 animate-pulse">Loading Python Engine...</span>
@@ -43,31 +48,56 @@
     <div class="flex flex-1 overflow-hidden">
         
         <div class="w-1/3 h-full border-r border-gray-700 bg-gray-800 flex flex-col">
-            <textarea id="code-editor">
-def fib(n):
-    if n <= 1:
-        return n
-    return fib(n-1) + fib(n-2)
+            
+            <div class="h-3/5 border-b border-gray-700 flex flex-col">
+                <div class="bg-gray-900 text-gray-400 text-xs px-3 py-1 uppercase tracking-wider font-bold">Python Source Code</div>
+                <div class="flex-1 overflow-hidden"><textarea id="code-editor"></textarea></div>
+            </div>
 
-# Start the recursion!
-fib(4)
-</textarea>
+            <div class="h-2/5 flex">
+                <div class="w-1/2 border-r border-gray-700 flex flex-col">
+                    <div class="bg-gray-900 text-gray-400 text-xs px-3 py-1 uppercase tracking-wider font-bold">Custom Input (stdin)</div>
+                    <textarea id="stdin" class="flex-1 bg-gray-800 text-white p-3 text-sm font-mono resize-none focus:outline-none placeholder-gray-600" placeholder="Enter input here..."></textarea>
+                </div>
+                <div class="w-1/2 flex flex-col">
+                    <div class="bg-gray-900 text-gray-400 text-xs px-3 py-1 uppercase tracking-wider font-bold">Output (stdout)</div>
+                    <textarea id="stdout" readonly class="flex-1 bg-gray-900 text-green-400 p-3 text-sm font-mono resize-none focus:outline-none" placeholder="Program output will appear here..."></textarea>
+                </div>
+            </div>
+
         </div>
 
         <div class="w-2/3 h-full relative" id="tree-container">
+            <div id="placeholder-text" class="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none">
+                Write a recursive function and hit Run to generate the tree.
             </div>
+        </div>
 
     </div>
 
     <script>
+        const defaultCode = `import sys
+
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+# Read from the Custom Input box
+raw_input = sys.stdin.read().strip()
+num = int(raw_input) if raw_input else 5
+
+print(f"Starting calculation for factorial({num})...")
+result = factorial(num)
+print(f"Finished! The result is {result}")
+`;
+
         // Initialize CodeMirror Editor
         const editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
-            mode: "python",
-            theme: "dracula",
-            lineNumbers: true,
-            indentUnit: 4,
-            matchBrackets: true
+            mode: "python", theme: "dracula", lineNumbers: true, indentUnit: 4, matchBrackets: true
         });
+        editor.setValue(defaultCode);
+        document.getElementById("stdin").value = "4"; // Default input
 
         let pyodide;
 
@@ -76,24 +106,37 @@ fib(4)
             pyodide = await loadPyodide();
             document.getElementById("status").textContent = "Python Ready";
             document.getElementById("status").className = "text-sm text-green-400";
-            const runBtn = document.getElementById("run-btn");
-            runBtn.disabled = false;
-
-            runBtn.addEventListener("click", executeCode);
+            document.getElementById("run-btn").disabled = false;
         }
 
-        // Execute Python Code and Trace Calls
-        async function executeCode() {
+        // Execute Router
+        document.getElementById("run-btn").addEventListener("click", executePython);
+
+        // Execute Python (With I/O support)
+        async function executePython() {
             document.getElementById("status").textContent = "Running & Tracing...";
             document.getElementById("status").className = "text-sm text-yellow-400";
+            document.getElementById("placeholder-text").style.display = "none";
             
             const userCode = editor.getValue();
-            pyodide.globals.set("USER_CODE", userCode);
+            const userInput = document.getElementById("stdin").value;
+            const stdoutBox = document.getElementById("stdout");
+            
+            stdoutBox.value = ""; // clear output
+            stdoutBox.className = "flex-1 bg-gray-900 text-green-400 p-3 text-sm font-mono resize-none focus:outline-none";
 
-            // UPDATED PYTHON SCRIPT: Now with a step counter!
+            pyodide.globals.set("USER_CODE", userCode);
+            pyodide.globals.set("USER_INPUT", userInput);
+
             const tracerScript = `
 import sys
 import json
+from io import StringIO
+
+# Patch standard input and output
+sys.stdin = StringIO(USER_INPUT)
+captured_output = StringIO()
+sys.stdout = captured_output
 
 _step_counter = 1
 _tree_root = {"name": "Execution Start", "call_step": 0, "return_step": 0, "children": []}
@@ -101,7 +144,6 @@ _call_stack = [_tree_root]
 
 def _trace_calls(frame, event, arg):
     global _step_counter
-    # Only trace user code
     if frame.f_code.co_filename != "<string>": return _trace_calls
     if frame.f_code.co_name == "<module>": return _trace_calls
         
@@ -114,50 +156,56 @@ def _trace_calls(frame, event, arg):
                 val = frame.f_locals.get(var_name)
                 args.append(f"{var_name}={repr(val)}")
             except: pass
-        
-        # Log the call step
-        node = {
-            "name": f"{func_name}({', '.join(args)})", 
-            "return_val": "",
-            "call_step": _step_counter,
-            "return_step": -1,
-            "children": []
-        }
+        node = {"name": f"{func_name}({', '.join(args)})", "return_val": "", "call_step": _step_counter, "return_step": -1, "children": []}
         _step_counter += 1
         _call_stack[-1]["children"].append(node)
         _call_stack.append(node)
-        
     elif event == "return":
         if len(_call_stack) > 1:
             node = _call_stack.pop()
-            # Log the return step and value
             node["return_val"] = repr(arg)
             node["return_step"] = _step_counter
             _step_counter += 1
-            
     return _trace_calls
 
 sys.setprofile(_trace_calls)
 
+error_msg = None
 try:
     exec(USER_CODE, {"__name__": "__main__"})
 except Exception as e:
+    error_msg = str(e)
     _tree_root["children"].append({"name": f"Error: {e}", "call_step": _step_counter, "return_step": _step_counter, "children": []})
 finally:
     sys.setprofile(None)
+    sys.stdout = sys.__stdout__ # Restore standard out
     _tree_root["return_step"] = _step_counter
 
-json.dumps(_tree_root)
+json.dumps({
+    "tree": _tree_root,
+    "stdout": captured_output.getvalue(),
+    "error": error_msg
+})
 `;
             try {
                 const jsonOutput = await pyodide.runPythonAsync(tracerScript);
-                const treeData = JSON.parse(jsonOutput);
-                drawTree(treeData);
+                const result = JSON.parse(jsonOutput);
+                
+                // Print stdout to the terminal box
+                if (result.error) {
+                    stdoutBox.className = "flex-1 bg-gray-900 text-red-400 p-3 text-sm font-mono resize-none focus:outline-none";
+                    stdoutBox.value = result.stdout + "\\n[Error] " + result.error;
+                } else {
+                    stdoutBox.value = result.stdout || "[Program executed with no output]";
+                }
+
+                drawTree(result.tree);
                 document.getElementById("status").textContent = "Execution Complete";
                 document.getElementById("status").className = "text-sm text-green-400";
             } catch (err) {
-                console.error(err);
-                document.getElementById("status").textContent = "Syntax Error in Python";
+                stdoutBox.className = "flex-1 bg-gray-900 text-red-400 p-3 text-sm font-mono resize-none focus:outline-none";
+                stdoutBox.value = err;
+                document.getElementById("status").textContent = "Syntax Error";
                 document.getElementById("status").className = "text-sm text-red-400";
             }
         }
@@ -165,7 +213,7 @@ json.dumps(_tree_root)
         // Draw the D3 Tree with Timeline Animation
         function drawTree(data) {
             const container = d3.select("#tree-container");
-            container.selectAll("*").remove(); 
+            container.selectAll("svg").remove(); 
 
             const width = container.node().getBoundingClientRect().width;
             const height = container.node().getBoundingClientRect().height;
@@ -182,82 +230,30 @@ json.dumps(_tree_root)
 
             svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 50).scale(1));
 
-            // Faster animation speed because there are 2x as many steps now
             const ANIMATION_SPEED = 400; 
 
-            // 1. Draw Links using the target node's call_step
             g.selectAll(".link")
-                .data(root.links())
-                .join("path")
-                .attr("class", "link")
+                .data(root.links()).join("path").attr("class", "link")
                 .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y))
                 .attr("stroke-dasharray", function() { return this.getTotalLength() || 500; })
                 .attr("stroke-dashoffset", function() { return this.getTotalLength() || 500; })
-                .transition()
-                .duration(ANIMATION_SPEED)
-                .delay(d => d.target.data.call_step * ANIMATION_SPEED) 
+                .transition().duration(ANIMATION_SPEED).delay(d => d.target.data.call_step * ANIMATION_SPEED) 
                 .attr("stroke-dashoffset", 0);
 
-            // 2. Draw Nodes
             const nodes = g.selectAll(".node")
-                .data(root.descendants())
-                .join("g")
-                .attr("class", "node")
-                .attr("transform", d => `translate(${d.x},${d.y})`)
-                .style("opacity", 0); 
+                .data(root.descendants()).join("g").attr("class", "node")
+                .attr("transform", d => `translate(${d.x},${d.y})`).style("opacity", 0); 
 
-            // Animate node fading in
-            nodes.transition()
-                .duration(ANIMATION_SPEED)
-                .delay(d => d.data.call_step * ANIMATION_SPEED) 
-                .style("opacity", 1);
+            nodes.transition().duration(ANIMATION_SPEED).delay(d => d.data.call_step * ANIMATION_SPEED).style("opacity", 1);
+            nodes.append("circle").attr("r", 0).transition().duration(ANIMATION_SPEED).delay(d => d.data.call_step * ANIMATION_SPEED).attr("r", 6);
 
-            // Animate circle growing
-            nodes.append("circle")
-                .attr("r", 0) 
-                .transition()
-                .duration(ANIMATION_SPEED)
-                .delay(d => d.data.call_step * ANIMATION_SPEED)
-                .attr("r", 6);
-
-            // --- TEXT RENDERING ---
-            // Create the white outline for readability
-            const outline = nodes.append("text")
-                .attr("dy", "-1em")
-                .attr("text-anchor", "middle")
-                .attr("stroke", "white")
-                .attr("stroke-width", 3)
-                .attr("stroke-linejoin", "round")
-                .style("opacity", 0.8)
-                .lower();
-            
+            const outline = nodes.append("text").attr("dy", "-1em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower();
             outline.append("tspan").text(d => d.data.name);
-            outline.append("tspan")
-                .style("opacity", 0)
-                .text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "")
-                .transition()
-                .duration(ANIMATION_SPEED)
-                .delay(d => d.data.return_step * ANIMATION_SPEED)
-                .style("opacity", 1);
+            outline.append("tspan").style("opacity", 0).text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "").transition().duration(ANIMATION_SPEED).delay(d => d.data.return_step * ANIMATION_SPEED).style("opacity", 1);
 
-            // Create the main colored text
-            const mainText = nodes.append("text")
-                .attr("dy", "-1em")
-                .attr("text-anchor", "middle");
-
-            // The function call text (appears immediately with node)
+            const mainText = nodes.append("text").attr("dy", "-1em").attr("text-anchor", "middle");
             mainText.append("tspan").text(d => d.data.name);
-            
-            // The return value text (appears LATER, colored green)
-            mainText.append("tspan")
-                .style("opacity", 0)
-                .style("fill", "#059669") // Emerald green color
-                .text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "")
-                .transition()
-                .duration(ANIMATION_SPEED)
-                // Use the return_step to delay the pop-in!
-                .delay(d => d.data.return_step * ANIMATION_SPEED)
-                .style("opacity", 1);
+            mainText.append("tspan").style("opacity", 0).style("fill", "#059669").text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "").transition().duration(ANIMATION_SPEED).delay(d => d.data.return_step * ANIMATION_SPEED).style("opacity", 1);
         }
 
         init();
