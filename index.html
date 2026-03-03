@@ -37,9 +37,18 @@
             <h1 class="text-2xl font-bold text-purple-400">Recursion Visualizer</h1>
             <p class="text-xs text-gray-400">Watch the call stack resolve in real-time with I/O support.</p>
         </div>
-        <div class="flex items-center gap-4">
-            <span id="status" class="text-sm text-yellow-400 animate-pulse">Loading Python Engine...</span>
-            <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded font-bold transition-colors shadow-lg">
+        <div class="flex items-center gap-3">
+            <span id="status" class="text-sm text-yellow-400 animate-pulse mr-2">Loading Python Engine...</span>
+            
+            <input type="file" id="file-input" class="hidden" accept=".py,.txt" />
+            
+            <button id="import-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold transition-colors border border-gray-600 shadow-lg">
+                Import .py
+            </button>
+            <button id="export-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold transition-colors border border-gray-600 shadow-lg">
+                Export .py
+            </button>
+            <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded font-bold transition-colors shadow-lg ml-2">
                 Run Code
             </button>
         </div>
@@ -76,21 +85,7 @@
     </div>
 
     <script>
-        const defaultCode = `import sys
-
-def factorial(n):
-    if n <= 1:
-        return 1
-    return n * factorial(n - 1)
-
-# Read from the Custom Input box
-raw_input = sys.stdin.read().strip()
-num = int(raw_input) if raw_input else 5
-
-print(f"Starting calculation for factorial({num})...")
-result = factorial(num)
-print(f"Finished! The result is {result}")
-`;
+        const defaultCode = `import sys\n\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Read from the Custom Input box\nraw_input = sys.stdin.read().strip()\nnum = int(raw_input) if raw_input else 5\n\nprint(f"Starting calculation for factorial({num})...")\nresult = factorial(num)\nprint(f"Finished! The result is {result}")\n`;
 
         // Initialize CodeMirror Editor
         const editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
@@ -109,10 +104,41 @@ print(f"Finished! The result is {result}")
             document.getElementById("run-btn").disabled = false;
         }
 
-        // Execute Router
+        // --- IMPORT / EXPORT LOGIC ---
+
+        // Export functionality
+        document.getElementById("export-btn").addEventListener("click", () => {
+            const code = editor.getValue();
+            const blob = new Blob([code], { type: "text/plain" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "recursion_script.py";
+            a.click();
+            URL.revokeObjectURL(a.href); // Clean up memory
+        });
+
+        // Import functionality
+        const fileInput = document.getElementById("file-input");
+        document.getElementById("import-btn").addEventListener("click", () => {
+            fileInput.click(); // Trigger the hidden file input
+        });
+
+        fileInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                editor.setValue(event.target.result);
+            };
+            reader.readAsText(file);
+            fileInput.value = ""; // Reset input so the same file can be loaded again if needed
+        });
+
+        // --- EXECUTION LOGIC ---
+
         document.getElementById("run-btn").addEventListener("click", executePython);
 
-        // Execute Python (With I/O support)
         async function executePython() {
             document.getElementById("status").textContent = "Running & Tracing...";
             document.getElementById("status").className = "text-sm text-yellow-400";
@@ -122,7 +148,7 @@ print(f"Finished! The result is {result}")
             const userInput = document.getElementById("stdin").value;
             const stdoutBox = document.getElementById("stdout");
             
-            stdoutBox.value = ""; // clear output
+            stdoutBox.value = ""; 
             stdoutBox.className = "flex-1 bg-gray-900 text-green-400 p-3 text-sm font-mono resize-none focus:outline-none";
 
             pyodide.globals.set("USER_CODE", userCode);
@@ -133,7 +159,6 @@ import sys
 import json
 from io import StringIO
 
-# Patch standard input and output
 sys.stdin = StringIO(USER_INPUT)
 captured_output = StringIO()
 sys.stdout = captured_output
@@ -178,7 +203,7 @@ except Exception as e:
     _tree_root["children"].append({"name": f"Error: {e}", "call_step": _step_counter, "return_step": _step_counter, "children": []})
 finally:
     sys.setprofile(None)
-    sys.stdout = sys.__stdout__ # Restore standard out
+    sys.stdout = sys.__stdout__ 
     _tree_root["return_step"] = _step_counter
 
 json.dumps({
@@ -191,7 +216,6 @@ json.dumps({
                 const jsonOutput = await pyodide.runPythonAsync(tracerScript);
                 const result = JSON.parse(jsonOutput);
                 
-                // Print stdout to the terminal box
                 if (result.error) {
                     stdoutBox.className = "flex-1 bg-gray-900 text-red-400 p-3 text-sm font-mono resize-none focus:outline-none";
                     stdoutBox.value = result.stdout + "\\n[Error] " + result.error;
