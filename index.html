@@ -145,7 +145,6 @@
             stepDisplay.textContent = `${currentStep} / ${totalSteps}`;
             btnPlayPause.textContent = isPlaying ? "⏸" : "▶️";
             
-            // Auto-pause if we hit the end
             if (currentStep >= totalSteps && isPlaying) {
                 togglePlay();
             }
@@ -154,13 +153,13 @@
         function togglePlay() {
             isPlaying = !isPlaying;
             if (isPlaying) {
-                if (currentStep >= totalSteps) currentStep = 0; // loop back if at end
+                if (currentStep >= totalSteps) currentStep = 0; 
                 playInterval = setInterval(() => {
                     if (currentStep < totalSteps) {
                         currentStep++;
                         renderCurrentStep();
                     } else {
-                        togglePlay(); // Stop playing
+                        togglePlay(); 
                     }
                 }, PLAY_SPEED_MS);
             } else {
@@ -172,7 +171,7 @@
         btnPlayPause.addEventListener("click", togglePlay);
         
         btnStep.addEventListener("click", () => {
-            if (isPlaying) togglePlay(); // Pause if user manually steps
+            if (isPlaying) togglePlay(); 
             if (currentStep < totalSteps) {
                 currentStep++;
                 renderCurrentStep();
@@ -187,12 +186,12 @@
 
         // --- EXECUTION LOGIC ---
         document.getElementById("run-btn").addEventListener("click", async () => {
-            if (isPlaying) togglePlay(); // Stop current animation
+            if (isPlaying) togglePlay(); 
             
             document.getElementById("status").textContent = "Tracing...";
             document.getElementById("status").className = "text-sm text-yellow-400";
             document.getElementById("placeholder-text").style.display = "none";
-            debuggerPanel.classList.add("opacity-50", "pointer-events-none"); // Disable controls during run
+            debuggerPanel.classList.add("opacity-50", "pointer-events-none"); 
             
             const stdoutBox = document.getElementById("stdout");
             stdoutBox.value = ""; 
@@ -271,19 +270,16 @@ json.dumps({
                     stdoutBox.value = result.stdout || "[Program executed with no output]";
                 }
 
-                // Reset Debugger State
                 totalSteps = result.total_steps;
                 currentStep = 0;
                 
-                initD3Tree(result.tree); // Build the invisible tree
-                renderCurrentStep();     // Show step 0
+                initD3Tree(result.tree); 
+                renderCurrentStep();     
                 
-                // Enable UI
                 debuggerPanel.classList.remove("opacity-50", "pointer-events-none");
                 document.getElementById("status").textContent = "Execution Complete";
                 document.getElementById("status").className = "text-sm text-green-400";
                 
-                // Automatically start playing
                 togglePlay();
 
             } catch (err) {
@@ -315,21 +311,18 @@ json.dumps({
 
             svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 80).scale(1));
 
-            // Create invisible links
             const links = g.selectAll(".link")
                 .data(root.links()).join("path")
                 .attr("class", "link")
                 .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y))
-                .style("opacity", 0); // Hidden by default
+                .style("opacity", 0); 
 
-            // Create invisible nodes
             const nodes = g.selectAll(".node")
                 .data(root.descendants()).join("g")
                 .attr("class", "node")
                 .attr("transform", d => `translate(${d.x},${d.y})`)
-                .style("opacity", 0); // Hidden by default
+                .style("opacity", 0); 
 
-            // Drag Behavior
             const drag = d3.drag()
                 .on("start", function(event, d) { d3.select(this).classed("dragging", true); })
                 .on("drag", function(event, d) {
@@ -342,30 +335,25 @@ json.dumps({
 
             nodes.append("circle").attr("r", 8);
 
-            // Text (Function Call)
-            const outline = nodes.append("text").attr("class", "call-text-outline").attr("dy", "-1.2em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.name);
-            const mainText = nodes.append("text").attr("class", "call-text").attr("dy", "-1.2em").attr("text-anchor", "middle").text(d => d.data.name);
+            // UPDATED: Text (Function Call) is now anchored above the node
+            nodes.append("text").attr("class", "call-text-outline").attr("dy", "-1.2em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.name);
+            nodes.append("text").attr("class", "call-text").attr("dy", "-1.2em").attr("text-anchor", "middle").text(d => d.data.name);
 
-            // Text (Return Value) - Appended as separate elements for easier targeting
-            nodes.append("text").attr("class", "return-text-outline").attr("dy", "-1.2em").attr("dx", "0.5em").attr("text-anchor", "start").attr("stroke", "white").attr("stroke-width", 3).style("opacity", 0.8).lower().text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "");
-            nodes.append("text").attr("class", "return-text").attr("dy", "-1.2em").attr("dx", "0.5em").attr("text-anchor", "start").style("fill", "#059669").text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "");
+            // UPDATED: Text (Return Value) is now anchored below the node
+            nodes.append("text").attr("class", "return-text-outline").attr("dy", "1.8em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.return_val ? `➔ ${d.data.return_val}` : "");
+            nodes.append("text").attr("class", "return-text").attr("dy", "1.8em").attr("text-anchor", "middle").style("fill", "#059669").text(d => d.data.return_val ? `➔ ${d.data.return_val}` : "");
         }
 
-        // The "VCR Head" - Updates what is visible based on currentStep
         function renderCurrentStep() {
             updateDebuggerUI();
 
-            // Show links if the target node was called by this step
             d3.selectAll(".link")
                 .style("opacity", d => d.target.data.call_step <= currentStep ? 0.6 : 0);
 
-            // Show nodes and function names if called by this step
             d3.selectAll(".node")
                 .style("opacity", d => d.data.call_step <= currentStep ? 1 : 0)
-                // Highlight the node if it was EXACTLY called or returned on this step
                 .classed("active-step", d => d.data.call_step === currentStep || d.data.return_step === currentStep);
 
-            // Show return values ONLY if the return step has been reached
             d3.selectAll(".return-text, .return-text-outline")
                 .style("opacity", d => (d.data.return_step !== -1 && d.data.return_step <= currentStep) ? 1 : 0);
         }
