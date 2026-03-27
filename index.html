@@ -50,8 +50,9 @@
             
             <div class="h-6 w-px bg-gray-600 mx-1"></div> <div id="debugger-controls" class="flex items-center gap-2 bg-gray-900 p-1 rounded border border-gray-700 opacity-50 pointer-events-none transition-opacity">
                 <button id="btn-restart" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Restart (Start over)">⏮️</button>
+                <button id="btn-step-back" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Backward">⏪</button>
                 <button id="btn-play-pause" class="p-1.5 hover:bg-gray-700 rounded text-gray-300 w-8" title="Auto-Play / Pause">▶️</button>
-                <button id="btn-step" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Forward (Skip)">⏭️</button>
+                <button id="btn-step" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Forward">⏭️</button>
                 <span id="step-counter-display" class="text-xs text-gray-500 font-mono w-16 text-center">0 / 0</span>
             </div>
 
@@ -136,6 +137,7 @@
 
         // --- DEBUGGER CONTROLS UI ---
         const btnRestart = document.getElementById("btn-restart");
+        const btnStepBack = document.getElementById("btn-step-back");
         const btnPlayPause = document.getElementById("btn-play-pause");
         const btnStep = document.getElementById("btn-step");
         const stepDisplay = document.getElementById("step-counter-display");
@@ -170,6 +172,7 @@
 
         btnPlayPause.addEventListener("click", togglePlay);
         
+        // Step Forward
         btnStep.addEventListener("click", () => {
             if (isPlaying) togglePlay(); 
             if (currentStep < totalSteps) {
@@ -178,6 +181,16 @@
             }
         });
 
+        // Step Backward (The new button logic!)
+        btnStepBack.addEventListener("click", () => {
+            if (isPlaying) togglePlay(); 
+            if (currentStep > 0) {
+                currentStep--;
+                renderCurrentStep();
+            }
+        });
+
+        // Restart
         btnRestart.addEventListener("click", () => {
             if (isPlaying) togglePlay();
             currentStep = 0;
@@ -335,11 +348,9 @@ json.dumps({
 
             nodes.append("circle").attr("r", 8);
 
-            // UPDATED: Text (Function Call) is now anchored above the node
             nodes.append("text").attr("class", "call-text-outline").attr("dy", "-1.2em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.name);
             nodes.append("text").attr("class", "call-text").attr("dy", "-1.2em").attr("text-anchor", "middle").text(d => d.data.name);
 
-            // UPDATED: Text (Return Value) is now anchored below the node
             nodes.append("text").attr("class", "return-text-outline").attr("dy", "1.8em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.return_val ? `➔ ${d.data.return_val}` : "");
             nodes.append("text").attr("class", "return-text").attr("dy", "1.8em").attr("text-anchor", "middle").style("fill", "#059669").text(d => d.data.return_val ? `➔ ${d.data.return_val}` : "");
         }
