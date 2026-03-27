@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Python Recursion Tree Visualizer</title>
 
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌳</text></svg>">
+
     <script src="https://cdn.tailwindcss.com"></script>
     
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
@@ -42,12 +44,17 @@
         </div>
         
         <div class="flex items-center gap-3">
-            <span id="status" class="text-sm text-yellow-400 animate-pulse mr-2 w-32 text-right">Loading Engine...</span>
+            <span id="status" class="text-sm text-yellow-400 animate-pulse mr-2 w-28 text-right">Loading Engine...</span>
             
             <input type="file" id="file-input" class="hidden" accept=".py,.txt" />
             <button id="import-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Import</button>
             <button id="export-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Export</button>
             
+            <div class="h-6 w-px bg-gray-600 mx-1"></div> <div class="flex items-center gap-2 opacity-80 hover:opacity-100 transition-opacity">
+                <span class="text-xs text-gray-400 font-bold tracking-wide">SPEED</span>
+                <input type="range" id="speed-slider" min="100" max="1500" value="1000" class="w-20 accent-purple-500 cursor-pointer" title="Adjust Animation Speed">
+            </div>
+
             <div class="h-6 w-px bg-gray-600 mx-1"></div> <div id="debugger-controls" class="flex items-center gap-2 bg-gray-900 p-1 rounded border border-gray-700 opacity-50 pointer-events-none transition-opacity">
                 <button id="btn-restart" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Restart (Start over)">⏮️</button>
                 <button id="btn-step-back" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Backward">⏪</button>
@@ -90,6 +97,11 @@
 
     </div>
 
+    <footer class="bg-gray-900 border-t border-gray-800 p-2 text-center text-[10px] text-gray-500 tracking-wide flex justify-between px-6">
+        <span>© 2026 Open Source Recursion Visualizer. Free for educational and organizational use.</span>
+        <span class="text-green-600 font-semibold">✓ Secure Environment: Python executes entirely locally in WebAssembly. No source code or data is transmitted externally.</span>
+    </footer>
+
     <script>
         const defaultCode = `import sys\n\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Read from the Custom Input box\nraw_input = sys.stdin.read().strip()\nnum = int(raw_input) if raw_input else 4\n\nresult = factorial(num)\nprint(f"Finished! The result is {result}")\n`;
 
@@ -101,12 +113,26 @@
 
         let pyodide;
 
-        // --- DEBUGGER STATE ---
+        // --- DEBUGGER & SPEED STATE ---
         let currentStep = 0;
         let totalSteps = 0;
         let isPlaying = false;
         let playInterval = null;
-        const PLAY_SPEED_MS = 600;
+        
+        // Speed Mapping: Slider 100 (Slowest, 1500ms) to 1500 (Fastest, 100ms)
+        let playSpeedMs = 600; 
+        const speedSlider = document.getElementById("speed-slider");
+
+        // Update speed dynamically when slider is moved
+        speedSlider.addEventListener("input", (e) => {
+            playSpeedMs = 1600 - parseInt(e.target.value);
+            
+            // If we are currently playing, restart the interval so the speed change is instant
+            if (isPlaying) {
+                clearInterval(playInterval);
+                playInterval = setInterval(playNextStep, playSpeedMs);
+            }
+        });
 
         async function init() {
             pyodide = await loadPyodide();
@@ -152,18 +178,20 @@
             }
         }
 
+        function playNextStep() {
+            if (currentStep < totalSteps) {
+                currentStep++;
+                renderCurrentStep();
+            } else {
+                togglePlay(); 
+            }
+        }
+
         function togglePlay() {
             isPlaying = !isPlaying;
             if (isPlaying) {
                 if (currentStep >= totalSteps) currentStep = 0; 
-                playInterval = setInterval(() => {
-                    if (currentStep < totalSteps) {
-                        currentStep++;
-                        renderCurrentStep();
-                    } else {
-                        togglePlay(); 
-                    }
-                }, PLAY_SPEED_MS);
+                playInterval = setInterval(playNextStep, playSpeedMs);
             } else {
                 clearInterval(playInterval);
             }
@@ -172,7 +200,6 @@
 
         btnPlayPause.addEventListener("click", togglePlay);
         
-        // Step Forward
         btnStep.addEventListener("click", () => {
             if (isPlaying) togglePlay(); 
             if (currentStep < totalSteps) {
@@ -181,7 +208,6 @@
             }
         });
 
-        // Step Backward (The new button logic!)
         btnStepBack.addEventListener("click", () => {
             if (isPlaying) togglePlay(); 
             if (currentStep > 0) {
@@ -190,7 +216,6 @@
             }
         });
 
-        // Restart
         btnRestart.addEventListener("click", () => {
             if (isPlaying) togglePlay();
             currentStep = 0;
