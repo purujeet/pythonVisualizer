@@ -18,19 +18,19 @@
 
     <style>
         .CodeMirror { height: 100%; font-size: 15px; font-family: 'Fira Code', monospace; }
-        .node circle { fill: #8b5cf6; stroke: #c4b5fd; stroke-width: 3px; cursor: pointer; }
+        .node circle { fill: #8b5cf6; stroke: #c4b5fd; stroke-width: 3px; cursor: pointer; transition: all 0.2s; }
         .node text { font: 12px sans-serif; fill: #1f2937; font-weight: 600; pointer-events: none; }
-        .link { fill: none; stroke: #9ca3af; stroke-width: 2px; opacity: 0.6; }
+        .link { fill: none; stroke: #9ca3af; stroke-width: 2px; transition: opacity 0.2s; }
         #tree-container { background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; background-color: #f9fafb; cursor: grab; }
         #tree-container:active { cursor: grabbing; }
         
-        /* Custom Scrollbar for dark panels */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
 
-        /* Highlight dragged node */
-        .node.dragging circle { fill: #ec4899; stroke: #fbcfe8; }
+        /* Highlight node when dragging or active */
+        .node.dragging circle { fill: #ec4899 !important; stroke: #fbcfe8 !important; }
+        .node.active-step circle { stroke: #fbbf24 !important; stroke-width: 4px !important; fill: #f59e0b !important; }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden bg-gray-900 font-sans">
@@ -40,18 +40,22 @@
             <h1 class="text-2xl font-bold text-purple-400">Recursion Visualizer</h1>
             <p class="text-xs text-gray-400">Watch the call stack resolve in real-time with I/O support.</p>
         </div>
+        
         <div class="flex items-center gap-3">
-            <span id="status" class="text-sm text-yellow-400 animate-pulse mr-2">Loading Python Engine...</span>
+            <span id="status" class="text-sm text-yellow-400 animate-pulse mr-2 w-32 text-right">Loading Engine...</span>
             
             <input type="file" id="file-input" class="hidden" accept=".py,.txt" />
+            <button id="import-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Import</button>
+            <button id="export-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Export</button>
             
-            <button id="import-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold transition-colors border border-gray-600 shadow-lg">
-                Import .py
-            </button>
-            <button id="export-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold transition-colors border border-gray-600 shadow-lg">
-                Export .py
-            </button>
-            <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded font-bold transition-colors shadow-lg ml-2">
+            <div class="h-6 w-px bg-gray-600 mx-1"></div> <div id="debugger-controls" class="flex items-center gap-2 bg-gray-900 p-1 rounded border border-gray-700 opacity-50 pointer-events-none transition-opacity">
+                <button id="btn-restart" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Restart (Start over)">⏮️</button>
+                <button id="btn-play-pause" class="p-1.5 hover:bg-gray-700 rounded text-gray-300 w-8" title="Auto-Play / Pause">▶️</button>
+                <button id="btn-step" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Forward (Skip)">⏭️</button>
+                <span id="step-counter-display" class="text-xs text-gray-500 font-mono w-16 text-center">0 / 0</span>
+            </div>
+
+            <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-5 py-1.5 rounded font-bold transition-colors shadow-lg ml-1">
                 Run Code
             </button>
         </div>
@@ -86,7 +90,7 @@
     </div>
 
     <script>
-        const defaultCode = `import sys\n\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Read from the Custom Input box\nraw_input = sys.stdin.read().strip()\nnum = int(raw_input) if raw_input else 5\n\nprint(f"Starting calculation for factorial({num})...")\nresult = factorial(num)\nprint(f"Finished! The result is {result}")\n`;
+        const defaultCode = `import sys\n\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n\n# Read from the Custom Input box\nraw_input = sys.stdin.read().strip()\nnum = int(raw_input) if raw_input else 4\n\nresult = factorial(num)\nprint(f"Finished! The result is {result}")\n`;
 
         const editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
             mode: "python", theme: "dracula", lineNumbers: true, indentUnit: 4, matchBrackets: true
@@ -95,6 +99,13 @@
         document.getElementById("stdin").value = "4"; 
 
         let pyodide;
+
+        // --- DEBUGGER STATE ---
+        let currentStep = 0;
+        let totalSteps = 0;
+        let isPlaying = false;
+        let playInterval = null;
+        const PLAY_SPEED_MS = 600;
 
         async function init() {
             pyodide = await loadPyodide();
@@ -106,12 +117,10 @@
         // --- IMPORT / EXPORT LOGIC ---
         document.getElementById("export-btn").addEventListener("click", () => {
             const code = editor.getValue();
-            const blob = new Blob([code], { type: "text/plain" });
             const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
+            a.href = URL.createObjectURL(new Blob([code], { type: "text/plain" }));
             a.download = "recursion_script.py";
             a.click();
-            URL.revokeObjectURL(a.href); 
         });
 
         const fileInput = document.getElementById("file-input");
@@ -125,23 +134,72 @@
             fileInput.value = ""; 
         });
 
-        // --- EXECUTION LOGIC ---
-        document.getElementById("run-btn").addEventListener("click", executePython);
+        // --- DEBUGGER CONTROLS UI ---
+        const btnRestart = document.getElementById("btn-restart");
+        const btnPlayPause = document.getElementById("btn-play-pause");
+        const btnStep = document.getElementById("btn-step");
+        const stepDisplay = document.getElementById("step-counter-display");
+        const debuggerPanel = document.getElementById("debugger-controls");
 
-        async function executePython() {
-            document.getElementById("status").textContent = "Running & Tracing...";
+        function updateDebuggerUI() {
+            stepDisplay.textContent = `${currentStep} / ${totalSteps}`;
+            btnPlayPause.textContent = isPlaying ? "⏸" : "▶️";
+            
+            // Auto-pause if we hit the end
+            if (currentStep >= totalSteps && isPlaying) {
+                togglePlay();
+            }
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            if (isPlaying) {
+                if (currentStep >= totalSteps) currentStep = 0; // loop back if at end
+                playInterval = setInterval(() => {
+                    if (currentStep < totalSteps) {
+                        currentStep++;
+                        renderCurrentStep();
+                    } else {
+                        togglePlay(); // Stop playing
+                    }
+                }, PLAY_SPEED_MS);
+            } else {
+                clearInterval(playInterval);
+            }
+            updateDebuggerUI();
+        }
+
+        btnPlayPause.addEventListener("click", togglePlay);
+        
+        btnStep.addEventListener("click", () => {
+            if (isPlaying) togglePlay(); // Pause if user manually steps
+            if (currentStep < totalSteps) {
+                currentStep++;
+                renderCurrentStep();
+            }
+        });
+
+        btnRestart.addEventListener("click", () => {
+            if (isPlaying) togglePlay();
+            currentStep = 0;
+            renderCurrentStep();
+        });
+
+        // --- EXECUTION LOGIC ---
+        document.getElementById("run-btn").addEventListener("click", async () => {
+            if (isPlaying) togglePlay(); // Stop current animation
+            
+            document.getElementById("status").textContent = "Tracing...";
             document.getElementById("status").className = "text-sm text-yellow-400";
             document.getElementById("placeholder-text").style.display = "none";
+            debuggerPanel.classList.add("opacity-50", "pointer-events-none"); // Disable controls during run
             
-            const userCode = editor.getValue();
-            const userInput = document.getElementById("stdin").value;
             const stdoutBox = document.getElementById("stdout");
-            
             stdoutBox.value = ""; 
             stdoutBox.className = "flex-1 bg-gray-900 text-green-400 p-3 text-sm font-mono resize-none focus:outline-none";
 
-            pyodide.globals.set("USER_CODE", userCode);
-            pyodide.globals.set("USER_INPUT", userInput);
+            pyodide.globals.set("USER_CODE", editor.getValue());
+            pyodide.globals.set("USER_INPUT", document.getElementById("stdin").value);
 
             const tracerScript = `
 import sys
@@ -198,7 +256,8 @@ finally:
 json.dumps({
     "tree": _tree_root,
     "stdout": captured_output.getvalue(),
-    "error": error_msg
+    "error": error_msg,
+    "total_steps": _step_counter
 })
 `;
             try {
@@ -212,19 +271,32 @@ json.dumps({
                     stdoutBox.value = result.stdout || "[Program executed with no output]";
                 }
 
-                drawTree(result.tree);
+                // Reset Debugger State
+                totalSteps = result.total_steps;
+                currentStep = 0;
+                
+                initD3Tree(result.tree); // Build the invisible tree
+                renderCurrentStep();     // Show step 0
+                
+                // Enable UI
+                debuggerPanel.classList.remove("opacity-50", "pointer-events-none");
                 document.getElementById("status").textContent = "Execution Complete";
                 document.getElementById("status").className = "text-sm text-green-400";
+                
+                // Automatically start playing
+                togglePlay();
+
             } catch (err) {
                 stdoutBox.className = "flex-1 bg-gray-900 text-red-400 p-3 text-sm font-mono resize-none focus:outline-none";
                 stdoutBox.value = err;
                 document.getElementById("status").textContent = "Syntax Error";
                 document.getElementById("status").className = "text-sm text-red-400";
             }
-        }
+        });
 
-        // Draw the D3 Tree with Drag Interactions
-        function drawTree(data) {
+        // --- D3 RENDERING ---
+        
+        function initD3Tree(data) {
             const container = d3.select("#tree-container");
             container.selectAll("svg").remove(); 
 
@@ -232,71 +304,70 @@ json.dumps({
             const height = container.node().getBoundingClientRect().height;
 
             const svg = container.append("svg").attr("width", "100%").attr("height", "100%");
-            const g = svg.append("g");
+            const g = svg.append("g").attr("id", "d3-master-group");
 
             const zoom = d3.zoom().scaleExtent([0.1, 3]).on("zoom", (event) => g.attr("transform", event.transform));
             svg.call(zoom);
 
             const root = d3.hierarchy(data);
-            
-            // INCREASED SPACING: Wider horizontally, slightly taller vertically
             const treeLayout = d3.tree().nodeSize([240, 100]); 
             treeLayout(root);
 
             svg.call(zoom.transform, d3.zoomIdentity.translate(width / 2, 80).scale(1));
 
-            const ANIMATION_SPEED = 400; 
-
-            // Links setup
+            // Create invisible links
             const links = g.selectAll(".link")
-                .data(root.links()).join("path").attr("class", "link")
+                .data(root.links()).join("path")
+                .attr("class", "link")
                 .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y))
-                .attr("stroke-dasharray", function() { return this.getTotalLength() || 500; })
-                .attr("stroke-dashoffset", function() { return this.getTotalLength() || 500; });
-                
-            links.transition().duration(ANIMATION_SPEED).delay(d => d.target.data.call_step * ANIMATION_SPEED) 
-                .attr("stroke-dashoffset", 0);
+                .style("opacity", 0); // Hidden by default
 
-            // Nodes setup
+            // Create invisible nodes
             const nodes = g.selectAll(".node")
-                .data(root.descendants()).join("g").attr("class", "node")
+                .data(root.descendants()).join("g")
+                .attr("class", "node")
                 .attr("transform", d => `translate(${d.x},${d.y})`)
-                .style("opacity", 0); 
+                .style("opacity", 0); // Hidden by default
 
-            // --- DRAG BEHAVIOR ---
+            // Drag Behavior
             const drag = d3.drag()
-                .on("start", function(event, d) {
-                    d3.select(this).classed("dragging", true);
-                })
+                .on("start", function(event, d) { d3.select(this).classed("dragging", true); })
                 .on("drag", function(event, d) {
-                    // Update node data coordinates
-                    d.x += event.dx;
-                    d.y += event.dy;
-                    
-                    // Move the node visually
+                    d.x += event.dx; d.y += event.dy;
                     d3.select(this).attr("transform", `translate(${d.x},${d.y})`);
-                    
-                    // Stretch the links to follow the moved node
                     links.attr("d", d3.linkVertical().x(n => n.x).y(n => n.y));
                 })
-                .on("end", function(event, d) {
-                    d3.select(this).classed("dragging", false);
-                });
-
-            // Apply drag behavior to the nodes
+                .on("end", function(event, d) { d3.select(this).classed("dragging", false); });
             nodes.call(drag);
-            // ---------------------
 
-            nodes.transition().duration(ANIMATION_SPEED).delay(d => d.data.call_step * ANIMATION_SPEED).style("opacity", 1);
-            nodes.append("circle").attr("r", 0).transition().duration(ANIMATION_SPEED).delay(d => d.data.call_step * ANIMATION_SPEED).attr("r", 8);
+            nodes.append("circle").attr("r", 8);
 
-            const outline = nodes.append("text").attr("dy", "-1.2em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower();
-            outline.append("tspan").text(d => d.data.name);
-            outline.append("tspan").style("opacity", 0).text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "").transition().duration(ANIMATION_SPEED).delay(d => d.data.return_step * ANIMATION_SPEED).style("opacity", 1);
+            // Text (Function Call)
+            const outline = nodes.append("text").attr("class", "call-text-outline").attr("dy", "-1.2em").attr("text-anchor", "middle").attr("stroke", "white").attr("stroke-width", 3).attr("stroke-linejoin", "round").style("opacity", 0.8).lower().text(d => d.data.name);
+            const mainText = nodes.append("text").attr("class", "call-text").attr("dy", "-1.2em").attr("text-anchor", "middle").text(d => d.data.name);
 
-            const mainText = nodes.append("text").attr("dy", "-1.2em").attr("text-anchor", "middle");
-            mainText.append("tspan").text(d => d.data.name);
-            mainText.append("tspan").style("opacity", 0).style("fill", "#059669").text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "").transition().duration(ANIMATION_SPEED).delay(d => d.data.return_step * ANIMATION_SPEED).style("opacity", 1);
+            // Text (Return Value) - Appended as separate elements for easier targeting
+            nodes.append("text").attr("class", "return-text-outline").attr("dy", "-1.2em").attr("dx", "0.5em").attr("text-anchor", "start").attr("stroke", "white").attr("stroke-width", 3).style("opacity", 0.8).lower().text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "");
+            nodes.append("text").attr("class", "return-text").attr("dy", "-1.2em").attr("dx", "0.5em").attr("text-anchor", "start").style("fill", "#059669").text(d => d.data.return_val ? ` ➔ ${d.data.return_val}` : "");
+        }
+
+        // The "VCR Head" - Updates what is visible based on currentStep
+        function renderCurrentStep() {
+            updateDebuggerUI();
+
+            // Show links if the target node was called by this step
+            d3.selectAll(".link")
+                .style("opacity", d => d.target.data.call_step <= currentStep ? 0.6 : 0);
+
+            // Show nodes and function names if called by this step
+            d3.selectAll(".node")
+                .style("opacity", d => d.data.call_step <= currentStep ? 1 : 0)
+                // Highlight the node if it was EXACTLY called or returned on this step
+                .classed("active-step", d => d.data.call_step === currentStep || d.data.return_step === currentStep);
+
+            // Show return values ONLY if the return step has been reached
+            d3.selectAll(".return-text, .return-text-outline")
+                .style("opacity", d => (d.data.return_step !== -1 && d.data.return_step <= currentStep) ? 1 : 0);
         }
 
         init();
