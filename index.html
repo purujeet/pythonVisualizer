@@ -30,7 +30,6 @@
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
 
-        /* Highlight node when dragging or active */
         .node.dragging circle { fill: #ec4899 !important; stroke: #fbcfe8 !important; }
         .node.active-step circle { stroke: #fbbf24 !important; stroke-width: 4px !important; fill: #f59e0b !important; }
     </style>
@@ -50,12 +49,16 @@
             <button id="import-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Import</button>
             <button id="export-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm font-bold transition-colors border border-gray-600">Export</button>
             
-            <div class="h-6 w-px bg-gray-600 mx-1"></div> <div class="flex items-center gap-2 opacity-80 hover:opacity-100 transition-opacity">
+            <div class="h-6 w-px bg-gray-600 mx-1"></div> 
+
+            <div class="flex items-center gap-2 opacity-80 hover:opacity-100 transition-opacity">
                 <span class="text-xs text-gray-400 font-bold tracking-wide">SPEED</span>
                 <input type="range" id="speed-slider" min="100" max="1500" value="1000" class="w-20 accent-purple-500 cursor-pointer" title="Adjust Animation Speed">
             </div>
 
-            <div class="h-6 w-px bg-gray-600 mx-1"></div> <div id="debugger-controls" class="flex items-center gap-2 bg-gray-900 p-1 rounded border border-gray-700 opacity-50 pointer-events-none transition-opacity">
+            <div class="h-6 w-px bg-gray-600 mx-1"></div> 
+
+            <div id="debugger-controls" class="flex items-center gap-2 bg-gray-900 p-1 rounded border border-gray-700 opacity-50 pointer-events-none transition-opacity">
                 <button id="btn-restart" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Restart (Start over)">⏮️</button>
                 <button id="btn-step-back" class="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Step Backward">⏪</button>
                 <button id="btn-play-pause" class="p-1.5 hover:bg-gray-700 rounded text-gray-300 w-8" title="Auto-Play / Pause">▶️</button>
@@ -66,6 +69,10 @@
             <button id="run-btn" disabled class="bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-5 py-1.5 rounded font-bold transition-colors shadow-lg ml-1">
                 Run Code
             </button>
+
+            <a href="https://ko-fi.com/purujeetsinghal" target="_blank" class="bg-transparent hover:bg-yellow-500/10 text-yellow-400 border border-yellow-500/50 hover:border-yellow-400 px-4 py-1.5 rounded text-sm font-bold transition-colors ml-2 flex items-center gap-1">
+                <span>💛</span> Support
+            </a>
         </div>
     </header>
 
@@ -119,15 +126,11 @@
         let isPlaying = false;
         let playInterval = null;
         
-        // Speed Mapping: Slider 100 (Slowest, 1500ms) to 1500 (Fastest, 100ms)
         let playSpeedMs = 600; 
         const speedSlider = document.getElementById("speed-slider");
 
-        // Update speed dynamically when slider is moved
         speedSlider.addEventListener("input", (e) => {
             playSpeedMs = 1600 - parseInt(e.target.value);
-            
-            // If we are currently playing, restart the interval so the speed change is instant
             if (isPlaying) {
                 clearInterval(playInterval);
                 playInterval = setInterval(playNextStep, playSpeedMs);
